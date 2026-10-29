@@ -1,6 +1,6 @@
 # Pricing Router Device
 
-Standalone HyperBEAM Forge package for `pricing-router@1.0`.
+Standalone HyperBEAM Forge package for `pricing-router@1.1`.
 
 Route adapter for p4 pricing devices.
 
@@ -9,7 +9,8 @@ It lets a node keep a default pricing device while routing selected request temp
 ## Compatibility
 
 - HyperBEAM pin: `4177b91993b2f590f4906bc9ca548724f8408875`
-- Device name: `pricing-router@1.0`
+- Device name: `pricing-router@1.1` (1.1 adds route `fallthrough`; routes
+  without it behave as in 1.0)
 
 ## Build
 
