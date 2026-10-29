@@ -43,7 +43,9 @@ forward_routes(Base, Req, [Route | Rest], Opts) ->
             hb_ao:resolve(PricingMsg, Req, Opts);
         true ->
             case fallthrough_quote(PricingMsg, Req, Opts) of
-                {ok, <<"infinity">>} -> forward_routes(Base, Req, Rest, Opts);
+                {ok, <<"infinity">>} ->
+                    Next = matching_routes(Base#{ <<"pricing-routes">> => Rest }, Req, Opts),
+                    forward_routes(Base, Req, Next, Opts);
                 Other -> Other
             end
     end.
@@ -106,17 +108,15 @@ list_routes(Routes, _Opts) when is_list(Routes) ->
 list_routes(_Routes, _Opts) ->
     [].
 
-match_routes(Request, Routes, Opts) ->
-    [
-        Route
-    ||
-        Route <- Routes,
-        hb_util:template_matches(
-            Request,
-            hb_maps:get(<<"template">>, Route, #{}, Opts),
-            Opts
-        )
-    ].
+%% Keep the remaining templates unevaluated until an explicit fallthrough.
+match_routes(_Request, [], _Opts) ->
+    [];
+match_routes(Request, [Route | Rest], Opts) ->
+    Template = hb_maps:get(<<"template">>, Route, #{}, Opts),
+    case hb_util:template_matches(Request, Template, Opts) of
+        true -> [Route | Rest];
+        false -> match_routes(Request, Rest, Opts)
+    end.
 
 %%% Tests
 
@@ -191,6 +191,37 @@ without_fallthrough_first_match_still_decides_test() ->
     ?assertEqual(
         {ok, <<"infinity">>},
         estimate(Base, pricing_req(<<"estimate">>, ar_wallet:new()), Opts)
+    ).
+
+unflagged_match_does_not_evaluate_later_malformed_template_test() ->
+    Owner = ar_wallet:new(),
+    Opts = router_opts(Owner),
+    Priced = lists:last(faff_then_priced(false)),
+    Malformed = #{<<"template">> => 42},
+    Req = pricing_req(<<"estimate">>, Owner),
+    ?assertEqual(
+        estimate(router_base([Priced]), Req, Opts),
+        estimate(router_base([Priced, Malformed]), Req, Opts)
+    ),
+    Faff = maps:remove(<<"fallthrough">>, hd(faff_then_priced(false))),
+    Base = router_base([Faff, Malformed]),
+    ?assertEqual({ok, 0}, estimate(Base, Req, Opts)),
+    ?assertEqual({ok, <<"infinity">>},
+        estimate(Base, pricing_req(<<"estimate">>, ar_wallet:new()), Opts)).
+
+fallthrough_only_evaluates_next_match_after_infinity_test() ->
+    Owner = ar_wallet:new(),
+    Stranger = ar_wallet:new(),
+    Opts = router_opts(Owner),
+    [Faff, Priced] = faff_then_priced(true),
+    Malformed = #{<<"template">> => 42},
+    ?assertEqual({ok, 0}, estimate(router_base([Faff, Malformed]),
+        pricing_req(<<"estimate">>, Owner), Opts)),
+    Unmatched = #{<<"template">> => <<"^/another$">>},
+    Req = pricing_req(<<"estimate">>, Stranger),
+    ?assertEqual(
+        estimate(router_base([Priced]), Req, Opts),
+        estimate(router_base([Faff, Unmatched, Priced, Malformed]), Req, Opts)
     ).
 
 exhausted_fallthrough_uses_default_device_test() ->
